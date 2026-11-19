@@ -1,0 +1,30 @@
+# ---- 个人片段数据（本地使用，勿提交） ----
+data/
+
+# ---- 本地工作区元数据 ----
+.workbuddy/
+
+# ---- Windows 系统文件 ----
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# ---- AHK 编译产物 / 备份 ----
+*.exe
+*.ahk.bak
+*~.ahk
+*.bak
+
+# ---- Python（图标生成脚本） ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# ---- 编辑器 / IDE ----
+.vscode/
+.idea/
