@@ -4,6 +4,8 @@
 
 **当前版本：v1.0.1**
 
+> 📖 普通用户请看使用说明：[简体中文](docs/UserGuide.zh-CN.md) | [English](docs/UserGuide.en.md)
+
 ## 功能
 
 - **快速搜索面板**：唤出后输入关键词实时过滤，↑↓ 选择、Enter 插入、Esc 关闭
