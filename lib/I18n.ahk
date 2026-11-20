@@ -281,6 +281,8 @@ class I18n {
         m["act.backFail"]         := en ? "Could not switch back to the original window — insertion cancelled"
                                         : "未能切回原窗口，已取消插入"
         m["act.pasteFail"]        := en ? "Insert failed:`n{1}"             : "插入失败：`n{1}"
+        m["act.clipFallback"]     := en ? "Snippet copied to clipboard — paste it manually (Ctrl+V)"
+                                        : "片段已复制到剪贴板，请手动粘贴（Ctrl+V）"
         m["act.assetMissing"]     := en ? "Resource file missing: {1}"     : "资源文件丢失：{1}"
         m["act.slashRegFail"]     := en ? "Trigger key registration failed: {1}"
                                         : "触发符注册失败：{1}"

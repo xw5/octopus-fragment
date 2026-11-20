@@ -5,7 +5,7 @@
 ; 入口脚本
 ; ============================================================
 ;@Ahk2Exe-SetName Octopus Fragment
-;@Ahk2Exe-SetVersion 1.0.1
+;@Ahk2Exe-SetVersion 1.0.2
 ;@Ahk2Exe-SetDescription 类 FastKeys 的片段管理工具（AutoHotkey v2）
 ;@Ahk2Exe-SetProductName Octopus Fragment
 ;@Ahk2Exe-SetMainIcon assets\OctopusFragment.ico

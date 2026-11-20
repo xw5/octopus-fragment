@@ -51,7 +51,7 @@ class SearchPanel {
         SearchPanel.ready := false
     }
 
-    static Show(kw := "") {
+    static Show(kw := "", activate := true) {
         SearchPanel.Build()
         ed := SearchPanel.edit
         ed.Value := kw
@@ -62,10 +62,27 @@ class SearchPanel {
         h := 340
         x := (sw - w) // 2
         y := (sh // 4)
-        SearchPanel.gui.Show("x" x " y" y " w" w " h" h)
-        ed.Focus()
-        ; 预填关键字时光标放到末尾，方便继续输入
-        try SendMessage(0x00B1, -1, -1, ed)
+        if (activate) {
+            SearchPanel.gui.Show("x" x " y" y " w" w " h" h)
+            ed.Focus()
+            ; 预填关键字时光标放到末尾，方便继续输入
+            try SendMessage(0x00B1, -1, -1, ed)
+        } else {
+            ; 先定位尺寸（Move 对隐藏窗口同样生效），再以不抢焦点方式显示
+            ; 注意：AHK Gui 只有 Show() 才会应用 x/y/w/h，直接 ShowWindow 会显示成
+            ; 一个未布局的小窗口，必须先 Move
+            SearchPanel.gui.Move(x, y, w, h)
+            DllCall("ShowWindow", "ptr", SearchPanel.gui.Hwnd, "int", 8)   ; SW_SHOWNA
+        }
+    }
+
+    ; 把焦点交给已显示（未激活）的面板
+    static Activate() {
+        if !SearchPanel.ready
+            return
+        WinActivate("ahk_id " SearchPanel.gui.Hwnd)
+        SearchPanel.edit.Focus()
+        try SendMessage(0x00B1, -1, -1, SearchPanel.edit)
     }
 
     static Hide() {
@@ -73,13 +90,16 @@ class SearchPanel {
             SearchPanel.gui.Hide()
     }
 
-    ; Esc 取消：触发符+关键字仍原样留在目标窗口里，直接关面板即可
+    ; Esc 取消：把 Tab 收尾时删掉的「触发符+关键字」原样打回目标窗口，再关面板
     static Cancel() {
-        global gSlashErase, gLastFocusHwnd
+        global gSlashDeleted, gSlashErase, gLastFocusHwnd
         gSlashErase := 0
         SearchPanel.Hide()
-        if (gLastFocusHwnd && WinExist("ahk_id " gLastFocusHwnd))
+        if (gLastFocusHwnd && WinExist("ahk_id " gLastFocusHwnd)) {
             WinActivate("ahk_id " gLastFocusHwnd)
+            try WinWaitActive("ahk_id " gLastFocusHwnd, , 1)
+            RestoreSlashDeleted()
+        }
     }
 
     static IsVisible() {
@@ -107,7 +127,7 @@ class SearchPanel {
         if (labels.Length)
             lb.Add(labels)
         else
-            lb.Add(I18n.T("search.empty"))
+            lb.Add([I18n.T("search.empty")])   ; Add 要求 Array，不能传单个字符串
         if (labels.Length)
             lb.Choose(1)
     }
