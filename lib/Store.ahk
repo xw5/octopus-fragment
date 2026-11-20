@@ -35,7 +35,6 @@ class Store {
             "auto_expand",     1,           ; 是否启用缩写自动展开
             "case_sensitive",  0,
             "search_limit",    50,
-            "theme",           "light",
             "slash_enable",    1,           ; 是否启用「触发符 + Tab」唤起搜索
             "slash_key",       "/",         ; 触发符（可自定义，如 / 或 ; 或 .b）
             "slash_timeout",   1500         ; 等待 Tab 的时长(ms)，超时按普通输入处理
@@ -166,6 +165,21 @@ class Store {
             "created", now,
             "modified", now
         ))
+        ; 动态变量示例：插入时弹窗填写 {{name}} / {{env}} / {{done}}，{{date}} 自动替换
+        Store.db["snippets"].Push(Map(
+            "id", Store.NewId(),
+            "title", "日报模板",
+            "trigger", "daily",
+            "category", "工作",
+            "type", "text",
+            "content", "【日报】{{date}}`n姓名：{{name}}`n环境：{{env}}`n`n今日完成：{{done}}`n明日计划：{{cursor}}",
+            "fields", "name|姓名|text|`nenv|环境|select|开发,测试,生产`ndone|今日完成|memo|",
+            "file", "",
+            "tags", "模板 日报 变量",
+            "usage", 0,
+            "created", now,
+            "modified", now
+        ))
     }
 
     static NewId() {
@@ -220,6 +234,69 @@ class Store {
         Store.db["snippets"].RemoveAt(i)
         Store.SaveDb()
         return true
+    }
+
+    ; ---------- 复制 ----------
+    ; 复制片段并插到原片段「前面」，名称 = 原名 + 序号（我的邮箱 -> 我的邮箱2 -> 我的邮箱3）
+    static Duplicate(id) {
+        i := Store.IndexOf(id)
+        if (i = 0)
+            return ""
+        src  := Store.db["snippets"][i]
+        newId := Store.NewId()
+
+        copy := Map()
+        for k, v in src
+            copy[k] := v
+        copy["id"]       := newId
+        copy["title"]    := Store.NextCopyTitle(src["title"])
+        copy["trigger"]  := ""          ; 缩写重复会让两条热字符串互相覆盖，复制品留空
+        copy["usage"]    := 0
+        copy["created"]  := A_Now
+        copy["modified"] := A_Now
+
+        ; 图片/文件：资源另存一份，避免删掉其中一个时把另一个的源文件也删了
+        if (copy.Has("file") && copy["file"] != "") {
+            srcPath := Store.AssetDir "\" copy["file"]
+            dstName := newId ".clip"
+            if FileExist(srcPath) {
+                try FileCopy(srcPath, Store.AssetDir "\" dstName, 1)
+                catch
+                    dstName := copy["file"]          ; 复制失败则共用原资源
+            } else {
+                dstName := copy["file"]
+            }
+            copy["file"] := dstName
+        }
+
+        Store.db["snippets"].InsertAt(i, copy)
+        Store.SaveDb()
+        return newId
+    }
+
+    ; 拆出「基名 + 末尾序号」：我的邮箱2 -> {base:我的邮箱, idx:2}
+    static SplitCopyTitle(title) {
+        base := title
+        idx  := 1
+        if RegExMatch(title, "^(.*[^\d\s])[\s\-_]*(\d+)$", &m) {
+            base := Trim(m[1])
+            idx  := Integer(m[2])
+        }
+        return Map("base", base, "idx", idx)
+    }
+
+    ; 下一个可用序号：同名里最大的序号 + 1
+    static NextCopyTitle(title) {
+        p    := Store.SplitCopyTitle(title)
+        base := p["base"]
+        n    := p["idx"]
+        for sn in Store.db["snippets"] {
+            q := Store.SplitCopyTitle(sn["title"])
+            if (q["base"] = base)
+                n := Max(n, q["idx"])
+        }
+        n := n + 1
+        return base n
     }
 
     static BumpUsage(id) {
@@ -280,39 +357,6 @@ class Store {
         return true
     }
 
-    ; ---------- 导入导出 ----------
-    static Export(path) {
-        try {
-            Store.WriteText(path, JSON.Stringify(Store.db, true))
-            return true
-        }
-        return false
-    }
-
-    static Import(path) {
-        try {
-            raw := FileRead(path, "UTF-8")
-            obj := JSON.Parse(raw)
-            if (Type(obj) != "Map" || Type(obj["snippets"]) != "Array")
-                return 0
-            n := 0
-            for sn in obj["snippets"] {
-                if (Type(sn) != "Map" || !sn.Has("id") || !sn.Has("title"))
-                    continue
-                sn["id"] := Store.NewId()
-                if !sn.Has("type")
-                    sn["type"] := "text"
-                if !sn.Has("usage")
-                    sn["usage"] := 0
-                Store.db["snippets"].Push(sn)
-                n++
-            }
-            Store.SaveDb()
-            return n
-        }
-        return 0
-    }
-
     ; ---------- 资源 (剪贴板图片/文件) ----------
     static CaptureClipboard(id) {
         ; 将当前剪贴板完整内容保存到 assets\{id}.clip
@@ -342,9 +386,5 @@ class Store {
             return true
         }
         return false
-    }
-
-    static AssetExists(file) {
-        return (file != "" && FileExist(Store.AssetDir "\" file))
     }
 }

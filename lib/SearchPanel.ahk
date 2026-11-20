@@ -58,19 +58,13 @@ class SearchPanel {
             SearchPanel.gui.Hide()
     }
 
-    ; Esc 取消：把「触发符+关键字」还原回目标窗口，避免白打
+    ; Esc 取消：触发符+关键字仍原样留在目标窗口里，直接关面板即可
     static Cancel() {
-        global gSlashPending, gLastFocusHwnd
-        pending := gSlashPending
-        gSlashPending := ""
+        global gSlashErase, gLastFocusHwnd
+        gSlashErase := 0
         SearchPanel.Hide()
-        if (pending = "")
-            return
-        if (gLastFocusHwnd && WinExist("ahk_id " gLastFocusHwnd)) {
+        if (gLastFocusHwnd && WinExist("ahk_id " gLastFocusHwnd))
             WinActivate("ahk_id " gLastFocusHwnd)
-            Sleep(60)
-            SendText(pending)
-        }
     }
 
     static IsVisible() {
@@ -90,7 +84,9 @@ class SearchPanel {
         SearchPanel.results := list
         labels := Array()
         for sn in list {
-            tag := sn["type"] = "text" ? "文本" : (sn["type"] = "image" ? "图片" : "文件")
+            tag := sn["type"] != "text"
+                ? (sn["type"] = "image" ? "图片" : "文件")
+                : (Template.HasVars(sn.Has("content") ? sn["content"] : "") ? "文本·变量" : "文本")
             label := sn["title"] . "  (" . tag . ")  " . sn["trigger"] . "  " . sn["category"]
             labels.Push(label)
         }
@@ -121,13 +117,11 @@ class SearchPanel {
     }
 
     static Confirm() {
-        global gSlashPending
         if (!SearchPanel.IsVisible())
             return
         idx := SearchPanel.list.Value
         if (idx < 1 || idx > SearchPanel.results.Length)
             return
-        gSlashPending := ""
         sn := SearchPanel.results[idx]
         PasteSnippet(sn["id"])
     }

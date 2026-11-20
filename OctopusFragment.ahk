@@ -4,9 +4,16 @@
 ; Octopus Fragment - 类 FastKeys 片段管理工具
 ; 入口脚本
 ; ============================================================
+;@Ahk2Exe-SetName Octopus Fragment
+;@Ahk2Exe-SetVersion 1.0.0
+;@Ahk2Exe-SetDescription 类 FastKeys 的片段管理工具（AutoHotkey v2）
+;@Ahk2Exe-SetProductName Octopus Fragment
+;@Ahk2Exe-SetMainIcon assets\OctopusFragment.ico
 
 #Include lib/JSON.ahk
 #Include lib/Store.ahk
+#Include lib/Template.ahk
+#Include lib/FillDialog.ahk
 #Include lib/Actions.ahk
 #Include lib/SearchPanel.ahk
 #Include lib/Manager.ahk
