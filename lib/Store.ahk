@@ -22,13 +22,18 @@ class Store {
             DirCreate(Store.DataDir)
         if !DirExist(Store.AssetDir)
             DirCreate(Store.AssetDir)
+        ; 先给个默认语言：配置读取失败时提示也要有文案
+        I18n.Init("auto")
         Store.LoadConfig()
+        ; 语言必须在读片段数据前就位：示例数据（分类名等）按语言生成
+        I18n.Init(Store.cfg.Has("lang") ? Store.cfg["lang"] : "auto")
         Store.LoadDb()
     }
 
     ; ---------- 默认配置 ----------
     static DefaultConfig() {
         return Map(
+            "lang",            "auto",      ; 界面语言：auto / zh / en
             "hotkey_search",   "^!Space",   ; Ctrl+Alt+Space
             "hotkey_manager",  "^!m",       ; Ctrl+Alt+M
             "abbrev_prefix",   ";;",        ; 缩写前缀
@@ -45,7 +50,7 @@ class Store {
         return Map(
             "version",    1,
             "snippets",   Array(),
-            "categories", Array("常用", "工作", "代码")
+            "categories", Array(I18n.T("seed.cat1"), I18n.T("seed.cat2"), I18n.T("seed.cat3"))
         )
     }
 
@@ -53,7 +58,7 @@ class Store {
     static WriteText(path, text) {
         f := FileOpen(path, "w", "UTF-8")
         if !IsObject(f)
-            throw Error("无法写入文件：" path)
+            throw Error(I18n.T("store.writeFail", path))
         try
             f.Write(text)
         finally
@@ -79,7 +84,7 @@ class Store {
             Store.cfg := obj
         } catch as e {
             Store.cfg := Store.DefaultConfig()
-            ToolTip("配置读取失败，已使用默认配置：`n" e.Message)
+            ToolTip(I18n.T("store.cfgLoadFail", e.Message))
             SetTimer(() => ToolTip(), -4000)
         }
     }
@@ -88,7 +93,7 @@ class Store {
         try
             Store.WriteText(Store.CfgFile, JSON.Stringify(Store.cfg, true))
         catch as e {
-            MsgBox("配置保存失败：`n" e.Message, "片段管理", "Icon!")
+            MsgBox(I18n.T("store.cfgSaveFail", e.Message), I18n.T("app.msgTitle"), "Icon!")
         }
     }
 
@@ -107,12 +112,12 @@ class Store {
             if !obj.Has("snippets") || Type(obj["snippets"]) != "Array"
                 obj["snippets"] := Array()
             if !obj.Has("categories") || Type(obj["categories"]) != "Array"
-                obj["categories"] := Array("常用")
+                obj["categories"] := Array(I18n.T("seed.cat1"))
             obj["version"] := 1
             Store.db := obj
         } catch as e {
             Store.db := Store.DefaultDb()
-            MsgBox("片段数据读取失败，已使用空数据。`n原文件未被覆盖：`n" Store.DbFile "`n`n" e.Message, "片段管理", "Icon!")
+            MsgBox(I18n.T("store.dbLoadFail", Store.DbFile, e.Message), I18n.T("app.msgTitle"), "Icon!")
         }
     }
 
@@ -120,34 +125,37 @@ class Store {
         try
             Store.WriteText(Store.DbFile, JSON.Stringify(Store.db, true))
         catch as e {
-            MsgBox("数据保存失败：`n" e.Message, "片段管理", "Icon!")
+            MsgBox(I18n.T("store.dbSaveFail", e.Message), I18n.T("app.msgTitle"), "Icon!")
         }
     }
 
     static SeedExamples() {
         now := A_Now
+        cat1 := I18n.T("seed.cat1")
+        cat2 := I18n.T("seed.cat2")
+        cat3 := I18n.T("seed.cat3")
         Store.db["snippets"].Push(Map(
             "id", Store.NewId(),
-            "title", "我的邮箱",
+            "title", I18n.T("seed.email.title"),
             "trigger", "email",
-            "category", "常用",
+            "category", cat1,
             "type", "text",
             "content", "hello@example.com",
             "file", "",
-            "tags", "邮箱 联系方式",
+            "tags", I18n.T("seed.email.tags"),
             "usage", 0,
             "created", now,
             "modified", now
         ))
         Store.db["snippets"].Push(Map(
             "id", Store.NewId(),
-            "title", "常用收货地址",
+            "title", I18n.T("seed.addr.title"),
             "trigger", "addr",
-            "category", "常用",
+            "category", cat1,
             "type", "text",
-            "content", "广东省深圳市南山区`n科技园南区 1 栋`n518000",
+            "content", I18n.T("seed.addr.content"),
             "file", "",
-            "tags", "地址 快递",
+            "tags", I18n.T("seed.addr.tags"),
             "usage", 0,
             "created", now,
             "modified", now
@@ -156,11 +164,11 @@ class Store {
             "id", Store.NewId(),
             "title", "Console.log",
             "trigger", "log",
-            "category", "代码",
+            "category", cat3,
             "type", "text",
             "content", "console.log('DEBUG:', );",
             "file", "",
-            "tags", "js 调试",
+            "tags", I18n.T("seed.log.tags"),
             "usage", 0,
             "created", now,
             "modified", now
@@ -168,14 +176,14 @@ class Store {
         ; 动态变量示例：插入时弹窗填写 {{name}} / {{env}} / {{done}}，{{date}} 自动替换
         Store.db["snippets"].Push(Map(
             "id", Store.NewId(),
-            "title", "日报模板",
+            "title", I18n.T("seed.daily.title"),
             "trigger", "daily",
-            "category", "工作",
+            "category", cat2,
             "type", "text",
-            "content", "【日报】{{date}}`n姓名：{{name}}`n环境：{{env}}`n`n今日完成：{{done}}`n明日计划：{{cursor}}",
-            "fields", "name|姓名|text|`nenv|环境|select|开发,测试,生产`ndone|今日完成|memo|",
+            "content", I18n.T("seed.daily.content"),
+            "fields", I18n.T("seed.daily.fields"),
             "file", "",
-            "tags", "模板 日报 变量",
+            "tags", I18n.T("seed.daily.tags"),
             "usage", 0,
             "created", now,
             "modified", now
@@ -368,7 +376,7 @@ class Store {
         try
             FileOpen(path, "w").RawWrite(clip)
         catch as e {
-            MsgBox("资源保存失败：`n" e.Message, "片段管理", "Icon!")
+            MsgBox(I18n.T("store.assetFail", e.Message), I18n.T("app.msgTitle"), "Icon!")
             return ""
         }
         return name

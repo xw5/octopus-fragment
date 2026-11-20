@@ -4,10 +4,11 @@
 ; ============================================================
 
 class SearchPanel {
-    static Title   := "octopus-fragment 快速搜索"
+    static Title   := "Octopus Fragment · Quick Search"
     static gui     := ""
     static edit    := ""
     static list    := ""
+    static hint    := ""
     static results := Array()
     static ready   := false
 
@@ -24,8 +25,7 @@ class SearchPanel {
         g.SetFont("s10")
         lb := g.Add("ListBox", "x8 y46 w560 h260", [])
 
-        g.Add("Text", "x8 y312 w560 h20 Center c808080",
-            "↑↓ 选择   Enter 插入   Esc 关闭")
+        hint := g.Add("Text", "x8 y312 w560 h20 Center c808080", I18n.T("search.hint"))
 
         ed.OnEvent("Change", (*) => SearchPanel.Filter())
         lb.OnEvent("DoubleClick", (*) => SearchPanel.Confirm())
@@ -33,7 +33,22 @@ class SearchPanel {
         SearchPanel.gui := g
         SearchPanel.edit := ed
         SearchPanel.list := lb
+        SearchPanel.hint := hint
         SearchPanel.ready := true
+    }
+
+    ; 切换语言时销毁重建（Gui 文本无法整体重设，只能重建）
+    static Reset() {
+        try {
+            if (SearchPanel.ready && IsObject(SearchPanel.gui) && SearchPanel.gui)
+                SearchPanel.gui.Destroy()
+        }
+        SearchPanel.gui := ""
+        SearchPanel.edit := ""
+        SearchPanel.list := ""
+        SearchPanel.hint := ""
+        SearchPanel.results := Array()
+        SearchPanel.ready := false
     }
 
     static Show(kw := "") {
@@ -84,10 +99,7 @@ class SearchPanel {
         SearchPanel.results := list
         labels := Array()
         for sn in list {
-            tag := sn["type"] != "text"
-                ? (sn["type"] = "image" ? "图片" : "文件")
-                : (Template.HasVars(sn.Has("content") ? sn["content"] : "") ? "文本·变量" : "文本")
-            label := sn["title"] . "  (" . tag . ")  " . sn["trigger"] . "  " . sn["category"]
+            label := sn["title"] . "  (" . I18n.TypeName(sn) . ")  " . sn["trigger"] . "  " . sn["category"]
             labels.Push(label)
         }
         lb := SearchPanel.list
@@ -95,7 +107,7 @@ class SearchPanel {
         if (labels.Length)
             lb.Add(labels)
         else
-            lb.Add("（无匹配片段）")
+            lb.Add(I18n.T("search.empty"))
         if (labels.Length)
             lb.Choose(1)
     }

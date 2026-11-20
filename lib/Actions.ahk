@@ -5,7 +5,7 @@
 
 class App {
     static Name    := "Octopus Fragment"
-    static Version := "1.0.0"
+    static Version := "1.0.1"
 }
 
 global gLastFocusHwnd := 0     ; 呼出面板前的活动窗口
@@ -32,7 +32,7 @@ PasteSnippet(id, restoreFocus := true) {
     sn := Store.Get(id)
     if (sn = "") {
         EraseSlashTyped()
-        ToolTip("片段不存在")
+        ToolTip(I18n.T("act.noSnippet"))
         SetTimer(() => ToolTip(), -1500)
         return
     }
@@ -81,7 +81,7 @@ PasteSnippet(id, restoreFocus := true) {
         }
         if !back {
             gSlashErase := 0
-            ToolTip("未能切回原窗口，已取消插入")
+            ToolTip(I18n.T("act.backFail"))
             SetTimer(() => ToolTip(), -2500)
             return
         }
@@ -100,7 +100,7 @@ PasteSnippet(id, restoreFocus := true) {
                 ok := false
         } else {
             if !Store.RestoreClipboard(sn["file"])
-                throw Error("资源文件丢失：" sn["file"])
+                throw Error(I18n.T("act.assetMissing", sn["file"]))
             if !ClipWait(2, 1)
                 ok := false
         }
@@ -117,7 +117,7 @@ PasteSnippet(id, restoreFocus := true) {
             }
         }
     } catch as e {
-        ToolTip("插入失败：`n" e.Message)
+        ToolTip(I18n.T("act.pasteFail", e.Message))
         SetTimer(() => ToolTip(), -3000)
         ok := false
     }
@@ -179,7 +179,7 @@ RegisterSlashTrigger() {
         Hotstring(spec, (*) => SlashTrigger())
         gSlashSpec := spec
     } catch as e {
-        ToolTip("触发符注册失败：" e.Message)
+        ToolTip(I18n.T("act.slashRegFail", e.Message))
         SetTimer(() => ToolTip(), -3000)
     }
 }
@@ -245,8 +245,9 @@ IsOwnWindow(hwnd) {
 ; ---------- 托盘菜单 ----------
 BuildTrayMenu() {
     A_TrayMenu.Delete()
-    A_TrayMenu.Add("快速搜索", (*) => ShowSearch())
-    A_TrayMenu.Add("管理片段", (*) => Manager.Show())
+    lblMgr := I18n.T("tray.manager")
+    A_TrayMenu.Add(I18n.T("tray.search"), (*) => ShowSearch())
+    A_TrayMenu.Add(lblMgr, (*) => Manager.Show())
     A_TrayMenu.Add()
 
     ; 分类子菜单
@@ -261,23 +262,22 @@ BuildTrayMenu() {
             sub.Add(title, BindPaste(sn["id"]))
         }
         if !list.Length
-            sub.Add("(空)", (*) => 0)
+            sub.Add(I18n.T("tray.empty"), (*) => 0)
         A_TrayMenu.Add(c, sub)
     }
 
     A_TrayMenu.Add()
-    A_TrayMenu.Add("重新加载数据", (*) => ReloadAll())
-    A_TrayMenu.Add("重载脚本（改代码后用）", (*) => Reload())
-    A_TrayMenu.Add(App.Name " v" App.Version " · 关于", (*) => ShowAbout())
-    A_TrayMenu.Add("退出", (*) => ExitApp())
+    A_TrayMenu.Add(I18n.T("tray.reload"), (*) => ReloadAll())
+    A_TrayMenu.Add(I18n.T("tray.rescript"), (*) => Reload())
+    A_TrayMenu.Add(App.Name " v" App.Version " · " I18n.T("tray.about"), (*) => ShowAbout())
+    A_TrayMenu.Add(I18n.T("tray.exit"), (*) => ExitApp())
     A_TrayMenu.ClickCount := 2
-    A_TrayMenu.Default := "管理片段"
+    A_TrayMenu.Default := lblMgr
 }
 
 ShowAbout() {
-    MsgBox(App.Name " v" App.Version "`n"
-        . "类 FastKeys 的片段管理工具（AutoHotkey " A_AhkVersion "）`n`n"
-        . "数据目录：" Store.DataDir, "关于", "Iconi")
+    body := App.Name " v" App.Version "`n" I18n.T("about.body", Store.DataDir)
+    MsgBox(body, I18n.T("tray.about"), "Iconi")
 }
 
 ReloadAll() {
@@ -287,7 +287,7 @@ ReloadAll() {
     BuildTrayMenu()
     if Manager.ready
         Manager.RefreshCats()
-    ToolTip("片段已重新加载")
+    ToolTip(I18n.T("act.reloaded"))
     SetTimer(() => ToolTip(), -1500)
 }
 

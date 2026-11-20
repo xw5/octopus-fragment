@@ -6,7 +6,7 @@
 ; ============================================================
 
 class FillDialog {
-    static Title  := "填写变量"
+    static Title  := "Fill variables"
     static gui    := ""
     static items  := Array()
     static sn     := ""
@@ -23,14 +23,14 @@ class FillDialog {
         g.BackColor := "FFFFFF"
         g.MarginX := 12
         g.MarginY := 12
-        g.SetFont("s10", "Microsoft YaHei")
+        g.SetFont("s10", I18n.UiFont)
 
         items := Array()
         y := 12
         for f in fields {
-            g.SetFont("s9 c505050", "Microsoft YaHei")
+            g.SetFont("s9 c505050", I18n.UiFont)
             g.Add("Text", "x12 y" (y + 5) " w100 h20 +0x200", FillDialog.Clip(f["label"], 100))
-            g.SetFont("s10 c000000", "Microsoft YaHei")
+            g.SetFont("s10 c000000", I18n.UiFont)
 
             val := last.Has(f["name"]) ? last[f["name"]] : ""
             if (val = "" && f["default"] != "")
@@ -61,11 +61,11 @@ class FillDialog {
             y += 34
         }
 
-        g.SetFont("s9 c808080", "Microsoft YaHei")
-        g.Add("Text", "x12 y" (y + 8) " w260 h20 +0x200", "Enter 插入    Esc 取消")
-        g.SetFont("s10", "Microsoft YaHei")
-        ok := g.Add("Button", "x286 y" (y + 4) " w76 h28 Default", "插入")
-        cn := g.Add("Button", "x370 y" (y + 4) " w76 h28", "取消")
+        g.SetFont("s9 c808080", I18n.UiFont)
+        g.Add("Text", "x12 y" (y + 8) " w260 h20 +0x200", I18n.T("fill.hint"))
+        g.SetFont("s10", I18n.UiFont)
+        ok := g.Add("Button", "x286 y" (y + 4) " w76 h28 Default", I18n.T("fill.ok"))
+        cn := g.Add("Button", "x370 y" (y + 4) " w76 h28", I18n.T("fill.cancel"))
         ok.OnEvent("Click", (*) => FillDialog.DoOk())
         cn.OnEvent("Click", (*) => FillDialog.DoCancel())
         g.OnEvent("Escape", (*) => FillDialog.DoCancel())

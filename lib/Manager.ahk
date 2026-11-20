@@ -4,12 +4,13 @@
 ; ============================================================
 
 class Manager {
-    static Title   := "octopus-fragment 片段管理"
+    static Title   := "Octopus Fragment · Snippets"
+    static ALL     := Chr(1)      ; 「全部」分类的内部值（与语言无关）
     static gui     := ""
     static lv      := ""
     static search  := ""
     static status  := ""
-    static curCat  := "全部"      ; 当前选中的分类 Tab
+    static curCat  := Chr(1)      ; 当前选中的分类 Tab（Manager.ALL = 全部）
     static tabBtns := Array()     ; [{ctl, cat, x, w}, ...]
     static tabCats := Array()     ; 全部分类（含「全部」）
     static tabWs   := Array()     ; 每个 Tab 的宽度
@@ -23,6 +24,7 @@ class Manager {
     static ready   := false
     static ctxOpen := false     ; 右键菜单正在显示（防重复弹出）
     static ctxFromUp := false    ; 本次右键已由 NM_RCLICK 处理
+    static msgHooked := false    ; 窗口消息只挂一次（重建窗口不重复挂）
 
     static Build() {
         if (Manager.ready)
@@ -34,9 +36,9 @@ class Manager {
         g.MarginY := 10
 
         ; 顶部：搜索
-        g.Add("Text", "x10 y12 w40 h24 +0x200", "搜索")
-        ed := g.Add("Edit", "x52 y10 w440 h26")
-        g.Add("Button", "x500 y9 w70 h26", "刷新").OnEvent("Click", (*) => Manager.RefreshCats())
+        g.Add("Text", "x10 y12 w46 h24 +0x200", I18n.T("mgr.search"))
+        ed := g.Add("Edit", "x60 y10 w432 h26")
+        g.Add("Button", "x500 y9 w70 h26", I18n.T("mgr.refresh")).OnEvent("Click", (*) => Manager.RefreshCats())
         more := g.Add("Button", "x578 y9 w68 h26", "⋯")
         more.OnEvent("Click", (*) => Manager.ShowMoreMenu())
 
@@ -49,8 +51,9 @@ class Manager {
         addTab.OnEvent("Click", (*) => Manager.AddCategory())
 
         ; ListView
-        lv := g.Add("ListView", "x10 y78 w636 h350",
-            ["名称", "缩写", "分类", "类型", "标签", "次数"])
+        cols := [I18n.T("mgr.col.name"), I18n.T("mgr.col.abbr"), I18n.T("mgr.col.category")]
+        cols.Push(I18n.T("mgr.col.type"), I18n.T("mgr.col.tags"), I18n.T("mgr.col.uses"))
+        lv := g.Add("ListView", "x10 y78 w636 h350", cols)
 
         st := g.Add("Text", "x10 y436 w636 h20 c808080", "")
 
@@ -61,7 +64,12 @@ class Manager {
         ; 每一项上右键：控件通知 NM_RCLICK（最可靠，不依赖控件是否转发 WM_CONTEXTMENU）
         lv.OnNotify(-5, (*) => Manager.OnListRClick())
         ; 空白处右键 / 键盘菜单键：WM_CONTEXTMENU
-        OnMessage(0x007B, (w, l, m, h) => Manager.OnContextMenu(w, l, m, h))
+        ; 只挂一次：切换语言会重建窗口，重复 OnMessage 会让菜单弹两次
+        if !Manager.msgHooked {
+            OnMessage(0x007B, (w, l, m, h) => Manager.OnContextMenu(w, l, m, h))
+            OnMessage(0x020A, (w, l, m, h) => Manager.OnWheel(w, l, m, h))
+            Manager.msgHooked := true
+        }
 
         Manager.gui := g
         Manager.lv := lv
@@ -72,8 +80,32 @@ class Manager {
         Manager.arrowR := arrowR
         Manager.ready := true
         Manager.RefreshCats()
-        ; 鼠标滚轮在 Tab 行上横向滚动
-        OnMessage(0x020A, (w, l, m, h) => Manager.OnWheel(w, l, m, h))
+    }
+
+    ; 切换语言时销毁重建（Gui 文本无法整体重设，只能重建）
+    static Reset() {
+        try {
+            if (Manager.ready && IsObject(Manager.gui) && Manager.gui)
+                Manager.gui.Destroy()
+        }
+        Manager.gui := ""
+        Manager.lv := ""
+        Manager.search := ""
+        Manager.status := ""
+        Manager.tabBtns := Array()
+        Manager.tabCats := Array()
+        Manager.tabWs := Array()
+        Manager.tabOff := 0
+        Manager.tabPlaced := 0
+        Manager.ul := ""
+        Manager.addTab := ""
+        Manager.arrowL := ""
+        Manager.arrowR := ""
+        Manager.ids := Array()
+        Manager.ctxOpen := false
+        Manager.ctxFromUp := false
+        Manager.curCat := Manager.ALL
+        Manager.ready := false
     }
 
     static Show() {
@@ -84,24 +116,28 @@ class Manager {
 
     ; 「⋯」下拉菜单：原来底部那排按钮都收进来
     static ShowMoreMenu() {
+        lblEdit := I18n.T("mgr.more.edit")
+        lblDel  := I18n.T("mgr.more.delete")
+        lblDup  := I18n.T("mgr.more.dup")
+        lblIns  := I18n.T("mgr.more.insert")
         m := Menu()
-        m.Add("新增片段", (*) => Editor.Open(""))
-        m.Add("编辑选中", (*) => Manager.EditSelected())
-        m.Add("删除选中", (*) => Manager.DeleteSelected())
-        m.Add("复制选中", (*) => Manager.DuplicateSelected())
-        m.Add("插入选中", (*) => Manager.InsertSelected())
+        m.Add(I18n.T("mgr.more.new"), (*) => Editor.Open(""))
+        m.Add(lblEdit, (*) => Manager.EditSelected())
+        m.Add(lblDel, (*) => Manager.DeleteSelected())
+        m.Add(lblDup, (*) => Manager.DuplicateSelected())
+        m.Add(lblIns, (*) => Manager.InsertSelected())
         m.Add()
-        m.Add("设置", (*) => Settings.Open())
-        m.Add("打开数据目录", (*) => Run('explorer.exe "' Store.DataDir '"'))
-        m.Add("重新加载数据", (*) => ReloadAll())
-        m.Add("重载脚本（改代码后用）", (*) => Reload())
+        m.Add(I18n.T("mgr.more.settings"), (*) => Settings.Open())
+        m.Add(I18n.T("mgr.more.datadir"), (*) => Run('explorer.exe "' Store.DataDir '"'))
+        m.Add(I18n.T("mgr.more.reload"), (*) => ReloadAll())
+        m.Add(I18n.T("mgr.more.rescript"), (*) => Reload())
         m.Add()
-        m.Add("退出", (*) => ExitApp())
+        m.Add(I18n.T("mgr.more.exit"), (*) => ExitApp())
         if (Manager.SelectedId() = "") {
-            m.Disable("编辑选中")
-            m.Disable("删除选中")
-            m.Disable("复制选中")
-            m.Disable("插入选中")
+            m.Disable(lblEdit)
+            m.Disable(lblDel)
+            m.Disable(lblDup)
+            m.Disable(lblIns)
         }
         m.Show()          ; 在鼠标处弹出，正好贴着「⋯」按钮下方
     }
@@ -174,16 +210,20 @@ class Manager {
     }
 
     static ShowRowMenu(hasRow, sx := -1, sy := -1) {
+        lblIns := I18n.T("mgr.ctx.insert")
+        lblEdt := I18n.T("mgr.ctx.edit")
+        lblDel := I18n.T("mgr.ctx.delete")
+        lblDup := I18n.T("mgr.ctx.dup")
         m := Menu()
-        m.Add("插入", (*) => Manager.InsertSelected())
-        m.Add("编辑", (*) => Manager.EditSelected())
-        m.Add("删除", (*) => Manager.DeleteSelected())
-        m.Add("复制", (*) => Manager.DuplicateSelected())
+        m.Add(lblIns, (*) => Manager.InsertSelected())
+        m.Add(lblEdt, (*) => Manager.EditSelected())
+        m.Add(lblDel, (*) => Manager.DeleteSelected())
+        m.Add(lblDup, (*) => Manager.DuplicateSelected())
         if !hasRow {
-            m.Disable("插入")
-            m.Disable("编辑")
-            m.Disable("删除")
-            m.Disable("复制")
+            m.Disable(lblIns)
+            m.Disable(lblEdt)
+            m.Disable(lblDel)
+            m.Disable(lblDup)
         }
         Manager.ctxOpen := true
         try {
@@ -200,7 +240,7 @@ class Manager {
     static DuplicateSelected() {
         id := Manager.SelectedId()
         if (id = "")
-            return MsgBox("请先选择一个片段。", Manager.Title, "Iconi")
+            return MsgBox(I18n.T("mgr.selectFirst"), Manager.Title, "Iconi")
         newId := Store.Duplicate(id)
         if (newId = "")
             return
@@ -208,7 +248,7 @@ class Manager {
         BuildTrayMenu()
         Manager.RefreshCats()
         Manager.SelectId(newId)
-        ToolTip("已复制：" Store.Get(newId)["title"])
+        ToolTip(I18n.T("mgr.copied", Store.Get(newId)["title"]))
         SetTimer(() => ToolTip(), -1500)
     }
 
@@ -225,7 +265,7 @@ class Manager {
     static RefreshCats() {
         if (!Manager.ready)
             return
-        cats := Array("全部")
+        cats := Array(Manager.ALL)
         for c in Store.Categories()
             cats.Push(c)
         ; 当前分类已不存在 -> 回退到「全部」
@@ -237,9 +277,14 @@ class Manager {
             }
         }
         if !found
-            Manager.curCat := "全部"
+            Manager.curCat := Manager.ALL
         Manager.BuildTabs(cats)
         Manager.Refresh()
+    }
+
+    ; Tab 上显示的分类名（「全部」按当前语言显示）
+    static TabLabel(cat) {
+        return (cat = Manager.ALL) ? I18n.T("mgr.all") : cat
     }
 
     ; 重建分类 Tab 栏（控件复用池，AHK v2 无法单独 Destroy 控件）
@@ -258,7 +303,7 @@ class Manager {
         Manager.tabCats := cats
         ws := Array()
         for c in cats
-            ws.Push(Max(64, StrLen(c) * 14 + 28))
+            ws.Push(Max(64, StrLen(Manager.TabLabel(c)) * 14 + 28))
         Manager.tabWs := ws
         if (Manager.tabOff > cats.Length - 1)
             Manager.tabOff := Max(0, cats.Length - 1)
@@ -319,7 +364,8 @@ class Manager {
             if (x + w > maxRight)
                 break
             t := Manager.tabBtns[i]
-            t["ctl"].Text := clipped ? Manager.ClipLabel(cats[i], w) : cats[i]
+            label := Manager.TabLabel(cats[i])
+            t["ctl"].Text := clipped ? Manager.ClipLabel(label, w) : label
             t["ctl"].Move(x, 44, w, 26)
             t["ctl"].Visible := true
             t["cat"] := cats[i]
@@ -345,7 +391,7 @@ class Manager {
             if (gap >= 14) {
                 t := Manager.tabBtns[i]
                 w := gap - 2
-                t["ctl"].Text := Manager.ClipLabel(cats[i], w)
+                t["ctl"].Text := Manager.ClipLabel(Manager.TabLabel(cats[i]), w)
                 t["ctl"].Move(x, 44, w, 26)
                 t["ctl"].Visible := true
                 t["cat"] := cats[i]
@@ -486,7 +532,7 @@ class Manager {
 
     ; 新增分类
     static AddCategory() {
-        ib := InputBox("分类名称（已存在则直接切换）", "新增分类", "w320 h130")
+        ib := InputBox(I18n.T("mgr.newcat.prompt"), I18n.T("mgr.newcat.title"), "w320 h130")
         if (ib.Result != "OK")
             return
         name := Trim(ib.Value)
@@ -502,8 +548,8 @@ class Manager {
 
     static SelectCat(name) {
         name := Trim(name)
-        if (name = "")
-            name := "全部"
+        if (name = "" || name = I18n.T("mgr.all"))
+            name := Manager.ALL
         Manager.curCat := name
         ; 保证选中项在可视范围内
         idx := 0
@@ -552,16 +598,13 @@ class Manager {
         if (!Manager.ready)
             return
         kw := Trim(Manager.search.Value)
-        cat := (Manager.curCat = "" || Manager.curCat = "全部") ? "" : Manager.curCat
+        cat := (Manager.curCat = "" || Manager.curCat = Manager.ALL) ? "" : Manager.curCat
         list := Store.Search(kw, cat)
         lv := Manager.lv
         lv.Delete()
         Manager.ids := Array()
         for sn in list {
-            typeName := sn["type"] != "text"
-                ? (sn["type"] = "image" ? "图片" : "文件")
-                : (Template.HasVars(sn.Has("content") ? sn["content"] : "") ? "文本·变量" : "文本")
-            lv.Add("", sn["title"], sn["trigger"], sn["category"], typeName,
+            lv.Add("", sn["title"], sn["trigger"], sn["category"], I18n.TypeName(sn),
                 sn.Has("tags") ? sn["tags"] : "", sn.Has("usage") ? sn["usage"] : 0)
             Manager.ids.Push(sn["id"])
         }
@@ -573,8 +616,8 @@ class Manager {
         lv.ModifyCol(5, 134)
         lv.ModifyCol(6, 50, "Integer")
         Manager.status.Text := (list.Length > 0)
-            ? "共 " list.Length " 个片段    数据文件：" Store.DbFile
-            : "该分类下暂无片段    数据文件：" Store.DbFile
+            ? I18n.T("mgr.status.count", list.Length, Store.DbFile)
+            : I18n.T("mgr.status.empty", Store.DbFile)
     }
 
     static SelectedId() {
@@ -589,16 +632,16 @@ class Manager {
     static EditSelected() {
         id := Manager.SelectedId()
         if (id = "")
-            return MsgBox("请先选择一个片段。", Manager.Title, "Iconi")
+            return MsgBox(I18n.T("mgr.selectFirst"), Manager.Title, "Iconi")
         Editor.Open(id)
     }
 
     static DeleteSelected() {
         id := Manager.SelectedId()
         if (id = "")
-            return MsgBox("请先选择一个片段。", Manager.Title, "Iconi")
+            return MsgBox(I18n.T("mgr.selectFirst"), Manager.Title, "Iconi")
         sn := Store.Get(id)
-        if MsgBox("确定删除片段「" sn["title"] "」？`n此操作不可恢复。", Manager.Title, "YesNo Icon!") != "Yes"
+        if MsgBox(I18n.T("mgr.del.confirm", sn["title"]), Manager.Title, "YesNo Icon!") != "Yes"
             return
         Store.Delete(id)
         RefreshHotstrings()
@@ -619,7 +662,7 @@ class Manager {
 ; Editor - 新增 / 编辑片段
 ; ============================================================
 class Editor {
-    static Title  := "编辑片段"
+    static Title  := "Edit snippet"
     static gui    := ""
     static editing:= ""
     static id     := ""
@@ -646,6 +689,35 @@ class Editor {
     static tickFn := ""          ; 悬浮轮询定时器回调（复用同一对象）
     static ready  := false
 
+    ; 切换语言时销毁重建（Gui 文本无法整体重设，只能重建）
+    static Reset() {
+        try Editor.StopHoverWatch()
+        try {
+            if (Editor.ready && IsObject(Editor.gui) && Editor.gui)
+                Editor.gui.Destroy()
+        }
+        Editor.gui := ""
+        Editor.titleEdit := ""
+        Editor.trig := ""
+        Editor.cat := ""
+        Editor.type := ""
+        Editor.tags := ""
+        Editor.content := ""
+        Editor.spec := ""
+        Editor.file := ""
+        Editor.hint := ""
+        Editor.specLabel := ""
+        Editor.phBtn := ""
+        Editor.tplBtn := ""
+        Editor.tipOn := false
+        Editor.hoverKey := ""
+        Editor.hoverT0 := 0
+        Editor.popOpen := ""
+        Editor.menuOpen := false
+        Editor.touched := Map()
+        Editor.ready := false
+    }
+
     static Build() {
         if (Editor.ready)
             return
@@ -655,45 +727,45 @@ class Editor {
         g.MarginY := 10
         g.SetFont("s10")
 
-        g.Add("Text", "x10 y12 w60 h22 +0x200", "名称")
+        g.Add("Text", "x10 y12 w60 h22 +0x200", I18n.T("editor.name"))
         t := g.Add("Edit", "x76 y10 w800 h24")
-        g.Add("Text", "x10 y44 w60 h22 +0x200", "缩写")
+        g.Add("Text", "x10 y44 w60 h22 +0x200", I18n.T("editor.abbr"))
         tr := g.Add("Edit", "x76 y42 w200 h24")
-        g.Add("Text", "x290 y44 w40 h22 +0x200", "分类")
+        g.Add("Text", "x290 y44 w56 h22 +0x200", I18n.T("editor.category"))
         ; 分类下拉框由 RefreshCats() 创建（需按分类数量决定展开高度）
-        g.Add("Text", "x10 y76 w60 h22 +0x200", "类型")
+        g.Add("Text", "x10 y76 w60 h22 +0x200", I18n.T("editor.type"))
         ; DropDownList 的 h 是「编辑框 + 展开列表」的总高，h24 只够半行，列表会被裁掉
-        ty := g.Add("DropDownList", "x76 y73 w160 h" (24 + 3 * 20 + 4), ["文本", "图片", "文件"])
-        g.Add("Text", "x250 y76 w60 h22 +0x200", "标签")
+        tyOpts := [I18n.T("type.text"), I18n.T("type.image"), I18n.T("type.file")]
+        ty := g.Add("DropDownList", "x76 y73 w160 h" (24 + 3 * 20 + 4), tyOpts)
+        g.Add("Text", "x250 y76 w60 h22 +0x200", I18n.T("editor.tags"))
         tg := g.Add("Edit", "x316 y74 w380 h24")
 
-        g.Add("Text", "x10 y108 w420 h22 +0x200", "内容（type=文本 时粘贴此内容）")
+        g.Add("Text", "x10 y108 w420 h22 +0x200", I18n.T("editor.contentLabel"))
         ; 「插入占位符」：点击插入 {{}} 且光标停在中间；悬停 0.4s 下拉已定义的动态变量
-        phb := g.Add("Button", "x440 y106 w108 h24", "插入占位符 ▾")
+        phb := g.Add("Button", "x440 y106 w108 h24", I18n.T("editor.insertPh"))
         phb.OnEvent("Click", (*) => Editor.OnPhClick())
         ct := g.Add("Edit", "x10 y130 w700 h160 +WantReturn VScroll", "")
         ct.OnEvent("Focus", (*) => Editor.MarkTouched(ct))
-        g.Add("Button", "x720 y130 w160 h32", "从剪贴板捕获").OnEvent("Click", (*) => Editor.Capture())
+        g.Add("Button", "x720 y130 w160 h32", I18n.T("editor.capture")).OnEvent("Click", (*) => Editor.Capture())
         ; 右侧信息区：宽 160 自动换行，高度留足，避免文件路径被截断
-        f := g.Add("Text", "x720 y172 w160 h56 c606060", "资源：无")
-        g.Add("Text", "x720 y234 w160 h76 c909090", "提示：图片/文件请先复制到剪贴板，再点「从剪贴板捕获」。")
+        f := g.Add("Text", "x720 y172 w160 h56 c606060", I18n.T("editor.res.none"))
+        g.Add("Text", "x720 y234 w160 h76 c909090", I18n.T("editor.res.tip"))
 
         ; 动态变量规格（标签尽量短，给右侧「?」和「插入模板」留出空位）
-        specLabel := "动态变量（可选）：每行 名称|标签|类型|默认值或选项   类型 text/memo/select"
+        specLabel := I18n.T("editor.specLabel")
         lb := g.Add("Text", "x10 y298 w720 h20 +0x200", specLabel)
         ; 「?」帮助：鼠标移上去显示动态变量教程（点击可弹窗查看/复制）
         hq := Editor.MakeHintCtrl(g)
-        hq.OnEvent("Click", (*) => MsgBox(Editor.HelpText, "动态变量使用教程", "Iconi"))
+        hq.OnEvent("Click", (*) => MsgBox(Editor.HelpText(), I18n.T("editor.help.title"), "Iconi"))
         ; 「插入模板」：点击或悬停 0.4s 下拉 text / memo / select 三种模板
-        tplb := g.Add("Button", "x560 y295 w100 h24", "插入模板 ▾")
+        tplb := g.Add("Button", "x560 y295 w100 h24", I18n.T("editor.insertTpl"))
         tplb.OnEvent("Click", (*) => Editor.OnTplClick())
         sp := g.Add("Edit", "x10 y320 w700 h100 +WantReturn VScroll", "")
         sp.OnEvent("Focus", (*) => Editor.MarkTouched(sp))
-        g.Add("Text", "x720 y320 w160 h104 c909090",
-            "内置变量：`n{{date}} {{time}}`n{{datetime}}`n{{date:yyyyMMdd}}`n{{clipboard}}`n{{cursor}} 光标位置")
+        g.Add("Text", "x720 y320 w160 h104 c909090", I18n.T("editor.builtinHint"))
 
-        g.Add("Button", "x710 y432 w80 h30", "保存").OnEvent("Click", (*) => Editor.Save())
-        g.Add("Button", "x800 y432 w80 h30", "取消").OnEvent("Click", (*) => Editor.CloseDlg())
+        g.Add("Button", "x710 y432 w80 h30", I18n.T("editor.save")).OnEvent("Click", (*) => Editor.Save())
+        g.Add("Button", "x800 y432 w80 h30", I18n.T("editor.cancel")).OnEvent("Click", (*) => Editor.CloseDlg())
         g.OnEvent("Close", (gObj, *) => Editor.CloseDlg())
 
         Editor.gui := g
@@ -721,7 +793,7 @@ class Editor {
         if (id = "") {
             ; 新增：分类默认跟随管理窗口当前高亮的 Tab（「全部」时用第一个分类）
             want := Manager.curCat
-            Editor.RefreshCats(want = "全部" ? "" : want)
+            Editor.RefreshCats(want = Manager.ALL ? "" : want)
             Editor.titleEdit.Value := ""
             Editor.trig.Value := ""
             Editor.type.Choose(1)
@@ -730,7 +802,7 @@ class Editor {
             Editor.spec.Value := ""
             Editor.capturedFile := ""
             Editor.ShowRes("")
-            Editor.gui.Title := "新增片段"
+            Editor.gui.Title := I18n.T("editor.titleNew")
         } else {
             sn := Store.Get(id)
             ; 编辑：默认选中该片段自身的分类
@@ -744,7 +816,7 @@ class Editor {
             Editor.type.Choose(ty)
             Editor.capturedFile := sn.Has("file") ? sn["file"] : ""
             Editor.ShowRes(Editor.capturedFile)
-            Editor.gui.Title := "编辑片段 - " sn["title"]
+            Editor.gui.Title := I18n.T("editor.titleEdit", sn["title"])
         }
         Editor.gui.Show("w900 h480 Center")
         Editor.PlaceHint()
@@ -752,39 +824,21 @@ class Editor {
     }
 
     ; ---------- 「?」帮助：悬浮显示动态变量教程 ----------
-    static HelpText :=
-        "动态变量使用教程`n`n"
-        . "0) 快捷按钮：`n"
-        . "    「插入占位符」点击=插入 {{}}（光标在中间）`n"
-        . "    鼠标停在该按钮上 → 下拉已定义的变量，点选即插入`n"
-        . "    「插入模板」点击或悬停 → 下拉 text / memo / select 模板`n`n"
-        . "① 在「内容」里写占位符 {{变量名}}`n"
-        . "    例：这是{{memo1}}测试`n`n"
-        . "② 在「动态变量」里逐行定义（一行一个）：`n"
-        . "    名称|标签|类型|默认值或选项`n"
-        . "    下拉：select|选择题|select|选项1,选项2`n"
-        . "    单行：name|姓名|text|张三`n"
-        . "    多行：desc|说明|memo|默认内容`n`n"
-        . "③ 类型：text 单行 / memo 多行 / select 下拉`n"
-        . "    select 的第四列用英文逗号分隔选项`n`n"
-        . "④ 内容里有、这里没定义的变量 → 自动弹单行输入框`n`n"
-        . "⑤ 内置变量（无需定义）：`n"
-        . "    {{date}} {{time}} {{datetime}}`n"
-        . "    {{date:yyyyMMdd}} 自定义格式`n"
-        . "    {{clipboard}} 剪贴板文本`n"
-        . "    {{cursor}} 插入后光标位置"
+    static HelpText() {
+        return I18n.T("editor.help.body")
+    }
 
     ; 「?」帮助控件：直接用问号字符（不用 Segoe MDL2 的 PUA 字形 —— 字体被替换时
     ; 会画成别的符号，这里要的是稳定的问号）；颜色同时写在控件选项和字体里，避免被覆盖
     static MakeHintCtrl(g) {
-        c := g.Add("Text", "x620 y298 w" Editor.hintSize " h" Editor.hintSize " +0x201 c1668DC", "?")
+        c := g.Add("Text", "x600 y298 w" Editor.hintSize " h" Editor.hintSize " +0x201 c1668DC", "?")
         c.SetFont("s11 bold c1668DC", "Segoe UI")
         return c
     }
 
-    ; 把「?」紧贴到标签文字末尾（按控件字体实测宽度，避免 DPI/字体不同错位）
-    ; 实测值偏小约 10px（CJK 混排），这里留 18px 余量，避免「?」压住 label 最后一个字
-    ; 「插入模板」按钮紧跟「?」，两者都不压到右侧信息栏
+    ; 把「?」摆到标签文字末尾、「插入模板」按钮紧跟其后
+    ; 关键：标签控件本身也收紧到实测宽度，两个控件**不再互相重叠**
+    ;（重叠时 Windows 局部重绘会把问号画成残缺字模，实测确认过）
     static PlaceHint() {
         if (!Editor.ready || !Editor.hint || !Editor.specLabel)
             return
@@ -793,10 +847,13 @@ class Editor {
         if (w <= 0)
             return
         scale := Max(1, A_ScreenDPI / 96)          ; Gui 坐标是逻辑单位，GDI 量出来是物理像素
-        x := Min(10 + Round(w / scale) + 22, 560)
+        tw := Round(w / scale)                     ; 文字实际占的逻辑宽度
+        pad := 14                                  ; CJK 混排实测偏小，留余量避免压住最后一字
+        Editor.specLabel.Move(10, 298, tw + pad, 20)
+        x := Min(10 + tw + pad + 4, 566)
         Editor.hint.Move(x, 298, Editor.hintSize, Editor.hintSize)
         if (Editor.tplBtn)
-            Editor.tplBtn.Move(Min(x + Editor.hintSize + 10, 596), 295, 100, 24)
+            Editor.tplBtn.Move(Min(x + Editor.hintSize + 8, 600), 295, 100, 24)
     }
 
     ; 用控件自身的字体量文字像素宽度
@@ -1013,21 +1070,22 @@ class Editor {
     static ShowVarMenu() {
         defs := Template.ParseSpec(Editor.spec.Value)
         m := Menu()
-        m.Add("插入空占位符 {{}}", (*) => Editor.InsertPlaceholder())
+        m.Add(I18n.T("editor.ph.empty"), (*) => Editor.InsertPlaceholder())
         m.Add()
 
         if defs.Length {
             for f in defs {
-                tag := "单行"
+                tag := I18n.T("editor.tag.text")
                 if (f["type"] = "select")
-                    tag := "下拉"
+                    tag := I18n.T("editor.tag.select")
                 else if (f["type"] = "memo")
-                    tag := "多行"
+                    tag := I18n.T("editor.tag.memo")
                 m.Add(f["label"] "  {{" f["name"] "}}  · " tag, Editor.VarInserter(f["name"]))
             }
         } else {
-            m.Add("（尚未定义动态变量，可用下方「插入模板」）", (*) => 0)
-            m.Disable("（尚未定义动态变量，可用下方「插入模板」）")
+            lblNone := I18n.T("editor.ph.noVars")
+            m.Add(lblNone, (*) => 0)
+            m.Disable(lblNone)
         }
 
         ; 内容里写了但规格里没定义的 → 也列出来，方便统一
@@ -1048,28 +1106,28 @@ class Editor {
         if extra.Length {
             m.Add()
             for n in extra
-                m.Add("{{" n "}}（内容中未定义）", Editor.VarInserter(n))
+                m.Add(I18n.T("editor.ph.extra", "{{" n "}}"), Editor.VarInserter(n))
         }
 
         ; 内置变量子菜单
         bm := Menu()
         for b in ["date", "time", "datetime", "date:yyyyMMdd", "clipboard", "cursor"] {
-            label := (b = "cursor") ? "{{cursor}} 光标位置" : "{{" b "}}"
+            label := (b = "cursor") ? I18n.T("editor.ph.cursor") : "{{" b "}}"
             bm.Add(label, Editor.VarInserter(b))
         }
         m.Add()
-        m.Add("内置变量", bm)
+        m.Add(I18n.T("editor.ph.builtin"), bm)
         Editor.PopAt(Editor.phBtn, m)
     }
 
     ; ---------- 「插入模板」下拉：text / memo / select ----------
     static ShowTplMenu() {
         m := Menu()
-        m.Add("text 单行：name|标签|text|默认值", Editor.TplInserter("name|标签|text|默认值"))
-        m.Add("memo 多行：desc|说明|memo|默认内容", Editor.TplInserter("desc|说明|memo|默认内容"))
-        m.Add("select 下拉：env|环境|select|开发,测试,生产", Editor.TplInserter("env|环境|select|开发,测试,生产"))
+        m.Add(I18n.T("editor.tpl.text"), Editor.TplInserter("name|" I18n.T("editor.tpl.fLabel") "|text|" I18n.T("editor.tpl.fDefault")))
+        m.Add(I18n.T("editor.tpl.memo"), Editor.TplInserter("desc|" I18n.T("editor.tpl.fNote") "|memo|" I18n.T("editor.tpl.fMemoDefault")))
+        m.Add(I18n.T("editor.tpl.select"), Editor.TplInserter("env|" I18n.T("editor.tpl.fEnv") "|select|" I18n.T("editor.tpl.fOptions")))
         m.Add()
-        m.Add("内置变量说明（点击查看）", (*) => MsgBox(Editor.HelpText, "动态变量使用教程", "Iconi"))
+        m.Add(I18n.T("editor.tpl.help"), (*) => MsgBox(Editor.HelpText(), I18n.T("editor.help.title"), "Iconi"))
         Editor.PopAt(Editor.tplBtn, m)
     }
 
@@ -1092,7 +1150,7 @@ class Editor {
     static TipAt(x, y) {
         prev := A_CoordModeToolTip
         CoordMode("ToolTip", "Screen")
-        ToolTip(Editor.HelpText, x, y, 1)
+        ToolTip(Editor.HelpText(), x, y, 1)
         CoordMode("ToolTip", prev)
     }
 
@@ -1134,7 +1192,7 @@ class Editor {
                 cats.Push(c)
         }
         if !cats.Length
-            cats.Push("常用")
+            cats.Push(I18n.T("editor.cat.default"))
 
         ; 定位要选中的分类；历史数据里的分类不在列表时补到最前，保证能选上
         idx := 0
@@ -1154,20 +1212,24 @@ class Editor {
         if (idx = 0)
             idx := 1
 
-        if (Editor.cat) {
-            try Editor.cat.Destroy()
+        ; 复用同一个 ComboBox：AHK v2 的 Gui.ComboBox 没有 Destroy()，重建会一层层叠起来
+        ; （实测每次 RefreshCats 都会在 (350,41) 多堆一个控件）
+        if (!Editor.cat) {
+            Editor.cat := Editor.gui.Add("ComboBox", "x350 y41 w160 h" (24 + cats.Length * 20 + 4), cats)
+        } else {
+            Editor.cat.Delete()
+            Editor.cat.Add(cats)
         }
         rows := Min(cats.Length, 12)          ; 分类过多时限制下拉高度
-        c := Editor.gui.Add("ComboBox", "x336 y41 w160 h" (24 + rows * 20 + 4), cats)
-        c.Choose(idx)
-        Editor.cat := c
+        Editor.cat.Move(350, 41, 160, 24 + rows * 20 + 4)
+        Editor.cat.Choose(idx)
         return cats
     }
 
     static Capture() {
         clip := ClipboardAll()
         if (clip.Size = 0) {
-            MsgBox("剪贴板为空。", Editor.Title, "Iconi")
+            MsgBox(I18n.T("editor.err.clipEmpty"), Editor.Title, "Iconi")
             return
         }
         id := Editor.id ? Editor.id : Store.NewId()
@@ -1183,28 +1245,28 @@ class Editor {
     ; 资源显示：只显示文件名（完整绝对路径太长，右栏放不下）
     static ShowRes(path := "") {
         if (path = "") {
-            Editor.file.Text := "资源：无"
+            Editor.file.Text := I18n.T("editor.res.none")
             return
         }
         SplitPath(path, &name)
-        Editor.file.Text := "资源：" (name != "" ? name : path)
+        Editor.file.Text := I18n.T("editor.res.some", name != "" ? name : path)
     }
 
     static Save() {
         title := Trim(Editor.titleEdit.Value)
         if (title = "")
-            return MsgBox("名称不能为空。", Editor.Title, "Icon!")
+            return MsgBox(I18n.T("editor.err.nameEmpty"), Editor.Title, "Icon!")
         trig := Trim(Editor.trig.Value)
         tyIdx := Editor.type.Value
         ty := tyIdx = 1 ? "text" : (tyIdx = 2 ? "image" : "file")
         if (ty = "text" && Editor.content.Value = "")
-            return MsgBox("内容不能为空。", Editor.Title, "Icon!")
+            return MsgBox(I18n.T("editor.err.contentEmpty"), Editor.Title, "Icon!")
         if (ty != "text" && (Editor.capturedFile = ""))
-            return MsgBox("请先从剪贴板捕获图片或文件。", Editor.Title, "Icon!")
+            return MsgBox(I18n.T("editor.err.needCapture"), Editor.Title, "Icon!")
 
         cat := Editor.cat.Text
         if (cat = "")
-            cat := "常用"
+            cat := I18n.T("editor.cat.default")
         Store.AddCategory(cat)
 
         data := Map(
@@ -1232,7 +1294,7 @@ class Editor {
         BuildTrayMenu()
         if Manager.ready
             Manager.RefreshCats()
-        ToolTip("已保存：" title)
+        ToolTip(I18n.T("editor.saved", title))
         SetTimer(() => ToolTip(), -1500)
     }
 }
@@ -1241,7 +1303,7 @@ class Editor {
 ; Settings - 全局设置
 ; ============================================================
 class Settings {
-    static Title := "设置"
+    static Title := "Settings"
     static gui   := ""
     static hSearch := ""
     static hMgr := ""
@@ -1251,7 +1313,27 @@ class Settings {
     static slashKey := ""
     static slashOn := ""
     static slashWait := ""
+    static lang := ""
     static ready := false
+
+    ; 切换语言时销毁重建（Gui 文本无法整体重设，只能重建）
+    static Reset() {
+        try {
+            if (Settings.ready && IsObject(Settings.gui) && Settings.gui)
+                Settings.gui.Destroy()
+        }
+        Settings.gui := ""
+        Settings.hSearch := ""
+        Settings.hMgr := ""
+        Settings.prefix := ""
+        Settings.auto := ""
+        Settings.limit := ""
+        Settings.slashKey := ""
+        Settings.slashOn := ""
+        Settings.slashWait := ""
+        Settings.lang := ""
+        Settings.ready := false
+    }
 
     static Build() {
         if (Settings.ready)
@@ -1260,32 +1342,37 @@ class Settings {
         g.BackColor := "FFFFFF"
         g.MarginX := 12
         g.MarginY := 10
-        g.SetFont("s10")
-        g.Add("Text", "x12 y12 w120 h24 +0x200", "搜索面板热键")
+        g.SetFont("s10", I18n.UiFont)
+        g.Add("Text", "x12 y12 w120 h24 +0x200", I18n.T("settings.hotkeySearch"))
         hs := g.Add("Edit", "x140 y10 w200 h24", Store.cfg["hotkey_search"])
-        g.Add("Text", "x12 y44 w120 h24 +0x200", "管理窗口热键")
+        g.Add("Text", "x12 y44 w120 h24 +0x200", I18n.T("settings.hotkeyMgr"))
         hm := g.Add("Edit", "x140 y42 w200 h24", Store.cfg["hotkey_manager"])
-        g.Add("Text", "x12 y78 w120 h24 +0x200", "缩写前缀")
+        g.Add("Text", "x12 y78 w120 h24 +0x200", I18n.T("settings.prefix"))
         px := g.Add("Edit", "x140 y76 w200 h24", Store.cfg["abbrev_prefix"])
-        g.Add("Text", "x350 y78 w260 h24 c808080", "例如两个分号加 email 展开")
-        au := g.Add("CheckBox", "x140 y108 w260 h24", "启用缩写自动展开")
+        g.Add("Text", "x350 y78 w260 h24 c808080", I18n.T("settings.prefixTip"))
+        au := g.Add("CheckBox", "x140 y108 w260 h24", I18n.T("settings.auto"))
         au.Value := Store.cfg["auto_expand"]
-        g.Add("Text", "x12 y140 w120 h24 +0x200", "搜索结果上限")
+        g.Add("Text", "x12 y140 w120 h24 +0x200", I18n.T("settings.limit"))
         lm := g.Add("Edit", "x140 y138 w200 h24", Store.cfg["search_limit"])
 
-        g.Add("Text", "x12 y172 w120 h24 +0x200", "搜索触发符")
+        g.Add("Text", "x12 y172 w120 h24 +0x200", I18n.T("settings.slashKey"))
         sk := g.Add("Edit", "x140 y170 w80 h24", Store.cfg["slash_key"])
-        g.Add("Text", "x228 y172 w380 h24 c808080", "输入该符号后按 Tab 唤起搜索面板")
-        so := g.Add("CheckBox", "x140 y200 w380 h24", "启用「触发符 + Tab」唤起搜索")
+        g.Add("Text", "x228 y172 w380 h24 c808080", I18n.T("settings.slashKeyTip"))
+        so := g.Add("CheckBox", "x140 y200 w380 h24", I18n.T("settings.slashOn"))
         so.Value := Store.cfg["slash_enable"]
-        g.Add("Text", "x12 y232 w120 h24 +0x200", "触发等待(ms)")
+        g.Add("Text", "x12 y232 w120 h24 +0x200", I18n.T("settings.slashWait"))
         sw := g.Add("Edit", "x140 y230 w80 h24", Store.cfg["slash_timeout"])
-        g.Add("Text", "x228 y232 w380 h24 c808080", "超时未按 Tab 就当作普通输入")
+        g.Add("Text", "x228 y232 w380 h24 c808080", I18n.T("settings.slashWaitTip"))
 
-        g.Add("Text", "x12 y266 w400 h40 c808080",
-            "热键语法：^ Ctrl   ! Alt   + Shift   # Win`n例：^!Space 表示 Ctrl+Alt+Space")
-        g.Add("Button", "x270 y316 w80 h30", "保存").OnEvent("Click", (*) => Settings.Save())
-        g.Add("Button", "x360 y316 w80 h30", "取消").OnEvent("Click", (*) => g.Hide())
+        ; 界面语言：跟随系统 / 简体中文 / English（切换后立即重建所有窗口）
+        g.Add("Text", "x12 y266 w120 h24 +0x200", I18n.T("settings.lang"))
+        lgOpts := [I18n.T("settings.langAuto"), I18n.T("settings.langZh"), I18n.T("settings.langEn")]
+        lg := g.Add("DropDownList", "x140 y264 w160 h" (24 + 3 * 20 + 4), lgOpts)
+        lg.Choose(Settings.LangIndex(Store.cfg.Has("lang") ? Store.cfg["lang"] : "auto"))
+
+        g.Add("Text", "x12 y300 w400 h40 c808080", I18n.T("settings.hotkeyHelp"))
+        g.Add("Button", "x270 y350 w80 h30", I18n.T("settings.save")).OnEvent("Click", (*) => Settings.Save())
+        g.Add("Button", "x360 y350 w80 h30", I18n.T("settings.cancel")).OnEvent("Click", (*) => g.Hide())
         g.OnEvent("Close", (gObj, *) => gObj.Hide())
 
         Settings.gui := g
@@ -1297,7 +1384,29 @@ class Settings {
         Settings.slashKey := sk
         Settings.slashOn := so
         Settings.slashWait := sw
+        Settings.lang := lg
         Settings.ready := true
+    }
+
+    ; 配置值 -> 下拉框序号
+    static LangIndex(pref) {
+        p := StrLower(Trim(pref))
+        if (p = "zh" || p = "cn")
+            return 2
+        if (p = "en")
+            return 3
+        return 1
+    }
+
+    ; 下拉框当前选择 -> 配置值
+    ; 注意：DropDownList 的 .Value 是「序号」不是文本（.Text 才是文本），按序号映射
+    static LangPref() {
+        idx := Settings.lang ? Settings.lang.Value : 0
+        switch idx {
+            case 2: return "zh"
+            case 3: return "en"
+        }
+        return "auto"
     }
 
     static Open() {
@@ -1310,6 +1419,7 @@ class Settings {
         Settings.slashKey.Value := Store.cfg["slash_key"]
         Settings.slashOn.Value := Store.cfg["slash_enable"]
         Settings.slashWait.Value := Store.cfg["slash_timeout"]
+        Settings.lang.Choose(Settings.LangIndex(Store.cfg.Has("lang") ? Store.cfg["lang"] : "auto"))
         Settings.gui.Show("Center")
     }
 
@@ -1325,20 +1435,29 @@ class Settings {
         if (key = "")
             key := "/"
         if (key = Trim(Store.cfg["abbrev_prefix"]))
-            return MsgBox("触发符不能与缩写前缀相同。", Settings.Title, "Icon!")
+            return MsgBox(I18n.T("settings.err.sameKey"), Settings.Title, "Icon!")
         if RegExMatch(key, "[A-Za-z0-9\s]")
-            return MsgBox("触发符请用符号，如 / 或 . ，避免纯字母数字或空格。", Settings.Title, "Icon!")
+            return MsgBox(I18n.T("settings.err.badKey"), Settings.Title, "Icon!")
         Store.cfg["slash_key"] := key
         Store.cfg["slash_enable"] := Settings.slashOn.Value
         w := Integer(Settings.slashWait.Value)
         Store.cfg["slash_timeout"] := (w >= 300) ? w : 1500
+
+        ; 语言变了：等本次事件处理完再重建窗口（不能在自己的按钮回调里销毁自己）
+        pref := Settings.LangPref()
+        langChanged := (I18n.Resolve(pref) != I18n.Lang || pref != Store.cfg["lang"])
 
         Store.SaveConfig()
         RegisterHotkeys()
         RefreshHotstrings()
         RegisterSlashTrigger()
         Settings.gui.Hide()
-        ToolTip("设置已保存，热键立即生效")
+
+        if langChanged {
+            SetTimer(() => I18n.ApplyLang(pref), -60)
+            return
+        }
+        ToolTip(I18n.T("settings.saved"))
         SetTimer(() => ToolTip(), -1800)
     }
 }
