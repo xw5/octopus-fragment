@@ -5,7 +5,7 @@
 
 class App {
     static Name    := "Octopus Fragment"
-    static Version := "1.0.2"
+    static Version := "1.0.3"
 }
 
 global gLastFocusHwnd := 0     ; 呼出面板前的活动窗口
