@@ -98,7 +98,9 @@ class SearchPanel {
         if (gLastFocusHwnd && WinExist("ahk_id " gLastFocusHwnd)) {
             WinActivate("ahk_id " gLastFocusHwnd)
             try WinWaitActive("ahk_id " gLastFocusHwnd, , 1)
-            RestoreSlashDeleted()
+            ; 只有真的切回目标窗口才还原，否则文本会打进别的窗口
+            if WinActive("ahk_id " gLastFocusHwnd)
+                RestoreSlashDeleted()
         }
     }
 

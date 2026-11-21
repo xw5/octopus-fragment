@@ -102,6 +102,7 @@ class Store {
             Store.db := Store.DefaultDb()
             Store.SeedExamples()
             Store.SaveDb()
+            Store.OtherCat()               ; 确保保留分类「其它」存在
             return
         }
         try {
@@ -113,8 +114,12 @@ class Store {
                 obj["snippets"] := Array()
             if !obj.Has("categories") || Type(obj["categories"]) != "Array"
                 obj["categories"] := Array(I18n.T("seed.cat1"))
+            ; 逐条补齐缺失键：手工编辑过的 JSON 缺 title/trigger 等键时，
+            ; Search/Refresh 等处会 KeyError，加载阶段统一兜底
+            obj["snippets"] := Store.NormalizeSnippets(obj["snippets"])
             obj["version"] := 1
             Store.db := obj
+            Store.OtherCat()               ; 保留分类「其它」：缺则补（名字记录在 other_cat）
         } catch as e {
             Store.db := Store.DefaultDb()
             MsgBox(I18n.T("store.dbLoadFail", Store.DbFile, e.Message), I18n.T("app.msgTitle"), "Icon!")
@@ -127,6 +132,37 @@ class Store {
         catch as e {
             MsgBox(I18n.T("store.dbSaveFail", e.Message), I18n.T("app.msgTitle"), "Icon!")
         }
+    }
+
+    ; 逐条补齐 snippet 必备键（缺键会在 Search/Refresh/TypeName 处 KeyError）；
+    ; 非 Map 的条目直接丢弃；type 非法时按 text 处理
+    static NormalizeSnippets(arr) {
+        clean := Array()
+        for item in arr {
+            if (Type(item) != "Map")
+                continue
+            if (!item.Has("id") || item["id"] = "")
+                item["id"] := Store.NewId()
+            for k, v in Map(
+                "title",    "",
+                "trigger",  "",
+                "category", I18n.T("editor.cat.default"),
+                "type",     "text",
+                "content",  "",
+                "file",     "",
+                "tags",     "",
+                "usage",    0
+            ) {
+                if !item.Has(k)
+                    item[k] := v
+            }
+            if (item["type"] != "text" && item["type"] != "image" && item["type"] != "file")
+                item["type"] := "text"
+            if (Trim(item["category"]) = "")   ; 空分类也归默认，避免菜单/Tab 出现空名条目
+                item["category"] := I18n.T("editor.cat.default")
+            clean.Push(item)
+        }
+        return clean
     }
 
     static SeedExamples() {
@@ -363,6 +399,91 @@ class Store {
         Store.db["categories"].Push(name)
         Store.SaveDb()
         return true
+    }
+
+    ; 保留分类「其它」：不可删除/重命名；删除分类时其下的片段都移入这里。
+    ; 名字记录在 db["other_cat"]（首次访问时按当前语言生成并落盘），
+    ; 避免以后切换界面语言时出现「其它/Other」两个并存；缺则补进分类列表
+    static OtherCat() {
+        nm := ""
+        if (Store.db.Has("other_cat") && Type(Store.db["other_cat"]) = "String")
+            nm := Store.db["other_cat"]
+        changed := false
+        if (nm = "") {
+            nm := I18n.T("cat.other")
+            Store.db["other_cat"] := nm
+            changed := true
+        }
+        found := false
+        for c in Store.db["categories"] {
+            if (c = nm) {
+                found := true
+                break
+            }
+        }
+        if !found {
+            Store.db["categories"].Push(nm)
+            changed := true
+        }
+        if (changed)
+            Store.SaveDb()
+        return nm
+    }
+
+    ; 删除分类。分类列表由 db["categories"] 与片段反推共同组成，
+    ; 片段必须一起挪走，否则删除的分类会立刻以派生形式重新出现；
+    ; 被挪走的片段统一移入保留分类「其它」
+    static DeleteCategory(name) {
+        if (name = Store.OtherCat())
+            return -1                      ; 保留分类不允许删除
+        for i, c in Store.db["categories"] {
+            if (c = name) {
+                Store.db["categories"].RemoveAt(i)
+                break
+            }
+        }
+        fallback := Store.OtherCat()
+        moved := 0
+        for sn in Store.db["snippets"] {
+            if (sn["category"] = name) {
+                sn["category"] := fallback
+                moved++
+            }
+        }
+        Store.SaveDb()
+        return moved
+    }
+
+    ; 重命名分类：列表与该分类下所有片段一起改名。
+    ; 返回 "ok" / "dup"（目标名已存在）/ "none"（名称无效）
+    static RenameCategory(oldName, newName) {
+        newName := Trim(newName)
+        if (newName = "" || newName = oldName)
+            return "none"
+        for c in Store.db["categories"] {
+            if (c = newName)
+                return "dup"
+        }
+        inList := false
+        for i, c in Store.db["categories"] {
+            if (c = oldName) {
+                Store.db["categories"][i] := newName
+                inList := true
+                break
+            }
+        }
+        moved := 0
+        for sn in Store.db["snippets"] {
+            if (sn["category"] = oldName) {
+                sn["category"] := newName
+                moved++
+            }
+        }
+        if (!inList && moved)
+            Store.db["categories"].Push(newName)   ; 原分类只存在于片段上（派生）
+        if (inList || moved)
+            Store.SaveDb()
+        return "ok"
     }
 
     ; ---------- 资源 (剪贴板图片/文件) ----------

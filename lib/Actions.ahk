@@ -31,6 +31,18 @@ DebugLog(msg) {
     }
 }
 
+; 取窗口标题/类名用于日志：面板刚隐藏、焦点切换瞬间可能没有活动窗口，
+; 直接 WinGetTitle("A") / WinGetClass("A") 会抛 TargetError，必须兜底
+SafeWinTitle(hwnd) {
+    try return WinGetTitle(hwnd)
+    return ""
+}
+
+SafeWinClass(hwnd) {
+    try return WinGetClass(hwnd)
+    return ""
+}
+
 quoted(s) {
     return "'" StrReplace(StrReplace(s, "`r", "\r"), "`n", "\n") "'"
 }
@@ -77,7 +89,7 @@ PasteSnippet(id, restoreFocus := true) {
         }
     }
     target := WinExist("A")
-    DebugLog("paste: id=" id " type=" sn["type"] " target=[" (target ? WinGetTitle(target) : "none") "] active=[" WinGetTitle("A") "]")
+    DebugLog("paste: id=" id " type=" sn["type"] " target=[" (target ? SafeWinTitle(target) : "none") "] active=[" SafeWinTitle("A") "]")
 
     ; 文本片段先渲染模板：含自定义变量时弹窗填写
     text  := ""
@@ -90,12 +102,22 @@ PasteSnippet(id, restoreFocus := true) {
         if Template.NeedsFill(sn) {
             vals := FillDialog.Collect(sn)
             if !IsObject(vals) {
-                ; 取消填写：焦点还给原窗口，并还原删掉的「触发符+关键字」
-                if (target && WinExist("ahk_id " target))
+                ; 取消填写：焦点还给原窗口，再还原删掉的「触发符+关键字」。
+                ; 切不回去就不动键盘（Backspace/还原文本会打进别的窗口），只丢弃记录
+                back := false
+                if (target && WinExist("ahk_id " target)) {
                     WinActivate("ahk_id " target)
-                Sleep(60)
-                EraseSlashTyped()
-                RestoreSlashDeleted()
+                    try WinWaitActive("ahk_id " target, , 1)
+                    back := WinActive("ahk_id " target) ? true : false
+                }
+                if (back) {
+                    Sleep(60)
+                    EraseSlashTyped()
+                    RestoreSlashDeleted()
+                } else {
+                    gSlashErase := 0
+                    gSlashDeleted := ""
+                }
                 return                       ; 用户取消，不插入
             }
             usedDialog := true
@@ -270,7 +292,10 @@ SlashTrigger(*) {
         ih := InputHook("V", "{Tab}{Escape}")
         ih.VisibleNonText := true      ; 方向键/快捷键照常放行，避免打断正常操作
         ih.Start()
-        ih.Wait(wait)
+        ; Wait 的参数单位是「秒」，slash_timeout 配置是毫秒，必须换算
+        ;（此前直接传毫秒值会挂起 25 分钟，期间 gSlashBusy 一直为 true，
+        ;  触发符+Tab 再唤起无响应，且迟到的 Tab/Esc 会误删正文/多发 Esc）
+        ih.Wait(wait / 1000)
         typed  := ih.Input
         reason := ih.EndReason
         endKey := ih.EndKey
@@ -303,7 +328,7 @@ SlashFinish(typed) {
     key := Trim(Store.cfg["slash_key"])
     expected := key . typed
     n := StrLen(expected)
-    DebugLog("slash finish: typed=" quoted(typed) " n=" n " active=[" WinGetTitle("A") "] class=" WinGetClass("A"))
+    DebugLog("slash finish: typed=" quoted(typed) " n=" n " active=[" SafeWinTitle("A") "] class=" SafeWinClass("A"))
 
     removed := false
 

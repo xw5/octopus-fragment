@@ -131,6 +131,7 @@ class I18n {
         m["mgr.ctx.edit"]        := en ? "Edit"                            : "编辑"
         m["mgr.ctx.delete"]      := en ? "Delete"                          : "删除"
         m["mgr.ctx.dup"]         := en ? "Duplicate"                       : "复制"
+        m["mgr.ctx.movecat"]     := en ? "Move to category"               : "修改分类"
         m["mgr.selectFirst"]     := en ? "Select a snippet first."         : "请先选择一个片段。"
         m["mgr.copied"]          := en ? "Duplicated: {1}"                 : "已复制：{1}"
         m["mgr.newcat.title"]    := en ? "New category"                    : "新增分类"
@@ -141,6 +142,16 @@ class I18n {
                                        : "该分类下暂无片段    数据文件：{1}"
         m["mgr.del.confirm"]     := en ? "Delete snippet `"{1}`"?`nThis cannot be undone."
                                        : "确定删除片段「{1}」？`n此操作不可恢复。"
+
+        ; 分类 Tab 右键菜单（编辑 = 重命名）
+        m["mgr.cat.del.confirm"]   := en ? "Delete category `"{1}`"?"
+                                         : "确定删除分类「{1}」？"
+        m["mgr.cat.del.confirmN"]  := en ? "Delete category `"{1}`"?`nIts {2} snippet(s) will move to `"{3}`"."
+                                         : "确定删除分类「{1}」？`n该分类下的 {2} 个片段将移入「{3}」。"
+        m["mgr.cat.rename.title"]  := en ? "Rename category"      : "编辑分类"
+        m["mgr.cat.rename.prompt"] := en ? "New category name"    : "新的分类名称"
+        m["mgr.cat.rename.dup"]    := en ? "A category with this name already exists."
+                                         : "已存在同名分类。"
 
         ; 编辑窗口
         m["editor.title"]        := en ? "Edit snippet"                    : "编辑片段"
@@ -308,6 +319,7 @@ class I18n {
         m["store.assetFail"]      := en ? "Failed to save resource:`n{1}"   : "资源保存失败：`n{1}"
 
         ; 首次运行的示例数据
+        m["cat.other"]            := en ? "Other"                           : "其它"
         m["seed.cat1"]            := en ? "Common"                          : "常用"
         m["seed.cat2"]            := en ? "Work"                            : "工作"
         m["seed.cat3"]            := en ? "Code"                            : "代码"

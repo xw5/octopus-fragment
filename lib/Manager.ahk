@@ -155,11 +155,9 @@ class Manager {
         return 0
     }
 
-    ; 空白处右键 / 键盘菜单键（lParam = -1 表示键盘触发）
+    ; 空白处右键 / 键盘菜单键（lParam = -1 表示键盘触发）；分类 Tab 上的右键另有菜单
     static OnContextMenu(wParam, lParam, msg, hwnd) {
         if (!Manager.ready || Manager.ctxOpen)
-            return
-        if (wParam != Manager.lv.Hwnd && hwnd != Manager.lv.Hwnd)
             return
 
         ; lParam 是打包的屏幕坐标
@@ -169,6 +167,16 @@ class Manager {
             sx -= 0x10000
         if (sy > 0x7FFF)
             sy -= 0x10000
+
+        ; 分类 Tab 上右键：弹出「编辑 / 删除分类」（「全部」「其它」和 ＋、箭头不给菜单）。
+        ; 子控件收到的 WM_CONTEXTMENU 转发给父窗口时 wParam = 控件句柄，据此反查分类
+        cat := Manager.TabByHwnd(wParam)
+        if (cat != "" && cat != Manager.ALL && cat != Store.OtherCat()) {
+            Manager.ShowTabMenu(cat)
+            return 0
+        }
+        if (wParam != Manager.lv.Hwnd && hwnd != Manager.lv.Hwnd)
+            return
 
         if (sx = -1 && sy = -1) {          ; 键盘菜单键：保持选中行不动
             Manager.ctxFromUp := false
@@ -214,26 +222,105 @@ class Manager {
         lblEdt := I18n.T("mgr.ctx.edit")
         lblDel := I18n.T("mgr.ctx.delete")
         lblDup := I18n.T("mgr.ctx.dup")
+        lblMove := I18n.T("mgr.ctx.movecat")
         m := Menu()
         m.Add(lblIns, (*) => Manager.InsertSelected())
         m.Add(lblEdt, (*) => Manager.EditSelected())
         m.Add(lblDel, (*) => Manager.DeleteSelected())
         m.Add(lblDup, (*) => Manager.DuplicateSelected())
+        m.Add(lblMove, Manager.BuildMoveCatMenu())   ; 修改分类：子菜单列现有分类
         if !hasRow {
             m.Disable(lblIns)
             m.Disable(lblEdt)
             m.Disable(lblDel)
             m.Disable(lblDup)
+            m.Disable(lblMove)
         }
         Manager.ctxOpen := true
         try {
             if (sx = -1 && sy = -1)
                 m.Show()
-            else
-                m.Show(sx, sy)
+            else {
+                ; sx/sy 是 WM_CONTEXTMENU 带来的屏幕坐标，而 Menu.Show 默认按
+                ; 「活动窗口客户区」解释坐标，必须显式切 Screen（否则菜单偏移）
+                prev := A_CoordModeMenu
+                CoordMode("Menu", "Screen")
+                try m.Show(sx, sy)
+                finally CoordMode("Menu", prev)
+            }
         } finally {
             Manager.ctxOpen := false
         }
+    }
+
+    ; 右键命中的分类 Tab（按控件句柄反查，与按钮上可能被截断的文字无关）；非 Tab 返回 ""
+    static TabByHwnd(hwnd) {
+        for t in Manager.tabBtns {
+            if (t["cat"] != "" && t["ctl"].Hwnd = hwnd)
+                return t["cat"]
+        }
+        return ""
+    }
+
+    ; 分类 Tab 右键菜单：编辑（重命名）/ 删除
+    static ShowTabMenu(cat) {
+        lblEdt := I18n.T("mgr.ctx.edit")
+        lblDel := I18n.T("mgr.ctx.delete")
+        m := Menu()
+        m.Add(lblEdt, (*) => Manager.RenameCategory(cat))
+        m.Add(lblDel, (*) => Manager.DeleteCategory(cat))
+        Manager.ctxOpen := true
+        try {
+            m.Show()          ; 右键菜单位置就是当前鼠标处，无需传坐标
+        } finally {
+            Manager.ctxOpen := false
+        }
+    }
+
+    ; 编辑（重命名）分类：db["categories"] 与该分类下的片段一起改名
+    static RenameCategory(cat) {
+        if (cat = Store.OtherCat())
+            return                     ; 保留分类不可重命名
+        ib := InputBox(I18n.T("mgr.cat.rename.prompt"), I18n.T("mgr.cat.rename.title"), "w320 h130", cat)
+        if (ib.Result != "OK")
+            return
+        newName := Trim(ib.Value)
+        if (newName = "" || newName = cat)
+            return
+        ; 重名检查用 Store.Categories()（含片段派生的分类）；自身除外
+        for c in Store.Categories() {
+            if (c = newName) {
+                MsgBox(I18n.T("mgr.cat.rename.dup"), Manager.Title, "Icon!")
+                return
+            }
+        }
+        if (Store.RenameCategory(cat, newName) != "ok")
+            return
+        BuildTrayMenu()
+        if (Manager.curCat = cat)
+            Manager.curCat := newName
+        if Editor.ready
+            Editor.RefreshCats(newName)
+        Manager.RefreshCats()
+    }
+
+    ; 删除分类：分类下的片段移入保留分类「其它」，有片段时先确认
+    static DeleteCategory(cat) {
+        n := 0
+        for sn in Store.db["snippets"] {
+            if (sn["category"] = cat)
+                n++
+        }
+        prompt := (n > 0)
+            ? I18n.T("mgr.cat.del.confirmN", cat, n, Store.OtherCat())
+            : I18n.T("mgr.cat.del.confirm", cat)
+        if MsgBox(prompt, Manager.Title, "YesNo Icon!") != "Yes"
+            return
+        Store.DeleteCategory(cat)
+        BuildTrayMenu()
+        if Editor.ready
+            Editor.RefreshCats("")     ; 原分类已删，编辑窗口回选第一个分类（避免补回已删分类）
+        Manager.RefreshCats()          ; 当前 Tab 已不存在 → 自动回退「全部」
     }
 
     ; 复制选中项：插到原项前面，名称 = 原名 + 序号
@@ -260,6 +347,44 @@ class Manager {
                 return
             }
         }
+    }
+
+    ; ---------- 修改分类 ----------
+    ; 子菜单：列出全部分类，点选即把选中片段移过去；当前分类打勾禁用。
+    ; 每次弹出菜单时重建（分类可能已变）
+    static BuildMoveCatMenu() {
+        id := Manager.SelectedId()
+        sn := (id != "") ? Store.Get(id) : ""
+        cur := IsObject(sn) ? sn["category"] : ""
+        sub := Menu()
+        for c in Store.Categories() {
+            if (c = cur) {
+                sub.Add(c, (*) => 0)
+                sub.Check(c)
+                sub.Disable(c)
+            } else {
+                sub.Add(c, Manager.MoveCatFn(c))   ; 必须用工厂闭包，直接写循环里会共享循环变量
+            }
+        }
+        return sub
+    }
+
+    static MoveCatFn(cat) {
+        return (*) => Manager.MoveSelectedTo(cat)
+    }
+
+    ; 把选中片段移入指定分类（只改分类字段，触发器等不动）
+    static MoveSelectedTo(cat) {
+        id := Manager.SelectedId()
+        if (id = "")
+            return
+        sn := Store.Get(id)
+        if (sn = "" || sn["category"] = cat)
+            return
+        Store.Update(id, Map("category", cat))
+        BuildTrayMenu()
+        Manager.RefreshCats()
+        Manager.SelectId(id)      ; 刷新后仍选中该行，方便连续操作
     }
 
     static RefreshCats() {
@@ -516,12 +641,14 @@ class Manager {
             return
         if !WinActive("ahk_id " Manager.gui.Hwnd)
             return
+        ; MouseGetPos 默认是 Client 坐标（相对活动窗口客户区），而 WinGetClientPos
+        ; 的 X/Y 是屏幕坐标，两者不能混比——旧代码混用，窗口居中时 ry 恒为负，
+        ; 滚轮永远不生效。这里只取客户区宽高（尺寸与坐标系无关）做范围兜底。
         MouseGetPos(&mx, &my)
-        WinGetClientPos(&cx, &cy, &cw, &ch, "ahk_id " Manager.gui.Hwnd)
-        if (mx < cx || mx > cx + cw || my < cy || my > cy + ch)
+        WinGetClientPos(, , &cw, &ch, "ahk_id " Manager.gui.Hwnd)
+        if (mx < 0 || mx > cw || my < 0 || my > ch)
             return
-        ry := my - cy
-        if (ry < 40 || ry > 78)
+        if (my < 40 || my > 78)                ; Tab 行（y44 h26）的宽松区间
             return
         delta := (wParam >> 16) & 0xFFFF
         if (delta > 0x7FFF)
@@ -641,6 +768,10 @@ class Manager {
         if (id = "")
             return MsgBox(I18n.T("mgr.selectFirst"), Manager.Title, "Iconi")
         sn := Store.Get(id)
+        if (sn = "") {
+            Manager.RefreshCats()          ; 数据刚被重载、该片段已不存在，刷新列表
+            return
+        }
         if MsgBox(I18n.T("mgr.del.confirm", sn["title"]), Manager.Title, "YesNo Icon!") != "Yes"
             return
         Store.Delete(id)
@@ -805,6 +936,12 @@ class Editor {
             Editor.gui.Title := I18n.T("editor.titleNew")
         } else {
             sn := Store.Get(id)
+            if (sn = "") {
+                ; 数据刚被重载、该片段已不存在：刷新列表并放弃本次编辑，避免空引用
+                if Manager.ready
+                    Manager.RefreshCats()
+                return
+            }
             ; 编辑：默认选中该片段自身的分类
             Editor.RefreshCats(sn["category"])
             Editor.titleEdit.Value := sn["title"]
@@ -1238,7 +1375,7 @@ class Editor {
             return
         Editor.capturedFile := file
         Editor.ShowRes(file)
-        ; 自动判定类型：剪贴板含图片则图片，否则文件
+        ; 捕获成功后默认按图片类型处理（剪贴板里是文件/文件夹时手动改下拉即可）
         Editor.type.Choose(2)
     }
 
@@ -1428,7 +1565,8 @@ class Settings {
         Store.cfg["hotkey_manager"] := Trim(Settings.hMgr.Value)
         Store.cfg["abbrev_prefix"] := Trim(Settings.prefix.Value)
         Store.cfg["auto_expand"] := Settings.auto.Value
-        lim := Integer(Settings.limit.Value)
+        lim := 0
+        try lim := Integer(Trim(Settings.limit.Value))   ; 输入非数字时 Integer 会抛异常，兜底取默认
         Store.cfg["search_limit"] := (lim > 0) ? lim : 50
 
         key := Trim(Settings.slashKey.Value)
@@ -1440,7 +1578,8 @@ class Settings {
             return MsgBox(I18n.T("settings.err.badKey"), Settings.Title, "Icon!")
         Store.cfg["slash_key"] := key
         Store.cfg["slash_enable"] := Settings.slashOn.Value
-        w := Integer(Settings.slashWait.Value)
+        w := 0
+        try w := Integer(Trim(Settings.slashWait.Value))
         Store.cfg["slash_timeout"] := (w >= 300) ? w : 1500
 
         ; 语言变了：等本次事件处理完再重建窗口（不能在自己的按钮回调里销毁自己）
